@@ -1,7 +1,8 @@
 # herdr-theoldinout
 
 A [herdr](https://herdr.dev) plugin: vim's jump list (`ctrl+o` / `ctrl+i`) for herdr, **across every machine your
-herdr window reaches** (`herdr machine list`). `prefix+o` takes you back to where you were, `prefix+i` forward again.
+herdr window reaches** (`herdr machine list`). `prefix+o` takes you back to where you were, `prefix+i` forward again, and `prefix+shift+i` lists the history
+(workspace and pane names, newest first) so you can jump straight to any place in it.
 
 A jump is any change of the focused pane, or of the machine the window shows. Going back to another machine switches
 the window there and focuses the pane. A new jump after going back drops what was ahead, as a browser does. The
@@ -30,6 +31,12 @@ key = "prefix+i"
 type = "plugin_action"
 command = "benjmhart.oldinout.forward"
 description = "jump forward"
+
+[[keys.command]]
+key = "prefix+shift+i"
+type = "plugin_action"
+command = "benjmhart.oldinout.pick"
+description = "jump history"
 ```
 
 Then start the daemon with your desktop session, on the machine you sit at (xmonad startup hook, i3/sway `exec`):
@@ -46,7 +53,10 @@ The keys run on the server the window shows, which may have no way back to your 
 `back`/`forward` to the plugin's state there. The daemon keeps one ssh pipe per machine (the same ssh herdr uses). At
 the far end a small helper streams that server's `pane.focused` events and those requests, and focuses panes on
 command (`pane.focus`). The daemon records a jump when the focused pane changes in the window you are using, or the
-window switches machine. To go to another machine it drives the window's Goto picker (`prefix+a`, `/`, the machine's
+window switches machine, with the workspace and pane names as they were then. After each change it writes a copy of
+the history to every machine through the same pipes, so the list (`prefix+shift+i`, a popup on whichever machine the
+window shows) reads it locally; Enter sends `goto N` back the way `back`/`forward` go. Choosing from the list moves
+your place in the history without dropping anything. To go to another machine it drives the window's Goto picker (`prefix+a`, `/`, the machine's
 label, Enter), as [herdr-queues](https://github.com/Benjmhart/herdr-queues) does.
 
 Needs X11 and `xdotool`, the Goto picker on `prefix+a` with `prefix` = ctrl+b, herdr's window title in its default

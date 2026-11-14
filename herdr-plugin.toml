@@ -1,8 +1,8 @@
 id = "benjmhart.oldinout"
 name = "The Old In-Out"
-version = "0.1.0"
+version = "0.2.0"
 min_herdr_version = "0.9.3"
-description = "vim's jump list for herdr, across every machine: prefix+o back to where you were, prefix+i forward"
+description = "vim's jump list for herdr, across every machine: prefix+o back to where you were, prefix+i forward, prefix+shift+i the list"
 platforms = ["linux"]
 
 [[actions]]
@@ -14,3 +14,16 @@ command = ["python3", "oldinout.py", "back"]
 id = "forward"
 title = "Jump forward (newer)"
 command = ["python3", "oldinout.py", "forward"]
+
+[[actions]]
+id = "pick"
+title = "Jump history list"
+command = ["python3", "oldinout.py", "pick"]
+
+[[panes]]
+id = "ui"
+title = "Jump history"
+placement = "popup"
+width = "90%"
+height = "80%"
+command = ["python3", "oldinout.py", "ui"]

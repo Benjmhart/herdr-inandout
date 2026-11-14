@@ -16,4 +16,9 @@ for i in range(O.LIMIT + 50):
     big.record(("m", f"w{i}:p1"))
 assert len(big.entries) == O.LIMIT and big.at == O.LIMIT - 1 and big.entries[0] == ("m", "w50:p1")
 assert O.History([("a", "b"), ("c", "d")], 0).step(1) == ("c", "d")   # reloaded from the file, place kept
+h = O.History([("a", "1"), ("b", "2"), ("c", "3")], 2)
+assert h.goto(0) == ("a", "1") and h.at == 0 and len(h.entries) == 3   # the list's choice: nothing dropped
+assert h.goto(9) is None and h.goto("1") is None and h.at == 0
+r = O.rows({"entries": [["a", "1"], ["b", "2"]], "at": 0, "meta": {"b 2": {"ws": "dots", "t": "vim"}}})
+assert r == [(1, " ", "b", "dots", "vim"), (0, ">", "a", "?", "1")]       # newest first; no names: the pane id
 print("ok")

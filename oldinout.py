@@ -5,13 +5,15 @@ were, prefix+i forward again.
   oldinout.py back | forward   the plugin's actions: ask the daemon (they run on the machine the window shows)
   oldinout.py daemon           run on the machine you sit at: keeps the history and carries out back/forward
   oldinout.py history          print the daemon's history (the newest last, > at the current place)
+  oldinout.py pick             the plugin's action: open the history list in a popup (prefix+shift+i)
+  oldinout.py ui               the list itself: newest first, Enter jumps to the entry
 
 How: the daemon keeps one ssh pipe per machine in `herdr machine list` (plus this one). At the far end a small helper
 streams that server's `pane.focused` events and its back/forward requests, and focuses panes when told to. A jump is
 any change of the focused pane, or of the machine the herdr window shows. Going to another machine drives the window's
 Goto picker (prefix+a, /, its label, Enter), as herdr-queues does. Standard library only.
 """
-import json, os, re, socket, subprocess, sys, threading, time
+import curses, json, os, re, socket, subprocess, sys, threading, time
 
 PLUGIN = "benjmhart.oldinout"
 STATE_ROOT = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
@@ -28,6 +30,7 @@ AGENT = r'''
 import json, os, socket, subprocess, sys, threading
 P = os.environ.get("HERDR_SOCKET_PATH") or os.path.expanduser("~/.config/herdr/herdr.sock")
 R = os.path.expanduser("~/.local/state/herdr/plugins/benjmhart.oldinout/requests")
+H = os.path.join(os.path.dirname(R), "history.json")
 lock = threading.Lock()
 def out(**k):
     with lock:
@@ -36,6 +39,14 @@ def call(method, params):
     with socket.socket(socket.AF_UNIX) as s:
         s.connect(P); s.sendall((json.dumps({"id": "oio", "method": method, "params": params}) + "\n").encode())
         return json.loads(s.makefile().readline())
+def focused(pane):
+    """The pane, with its workspace and title as they are now (the list shows them later)."""
+    try:
+        p = call("pane.get", {"pane_id": pane})["result"]["pane"]
+        w = call("workspace.get", {"workspace_id": p["workspace_id"]})["result"]["workspace"]
+        out(f=pane, ws=w.get("label") or p["workspace_id"], t=p.get("label") or p.get("terminal_title_stripped") or "")
+    except Exception:
+        out(f=pane)
 def events():
     s = socket.socket(socket.AF_UNIX); s.connect(P)
     s.sendall((json.dumps({"id": "oio", "method": "events.subscribe",
@@ -43,17 +54,20 @@ def events():
     for ln in s.makefile():
         d = json.loads(ln)
         if d.get("event") == "pane_focused":
-            out(f=d["data"]["pane_id"])
+            focused(d["data"]["pane_id"])
     os._exit(1)
 os.makedirs(os.path.dirname(R), exist_ok=True); open(R, "a").close()
 t = subprocess.Popen(["tail", "-n0", "-F", R], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
 def requests():
     for ln in t.stdout:
-        if ln.strip() in ("back", "forward"):
-            out(r=ln.strip())
+        a = ln.split()
+        if a in (["back"], ["forward"]):
+            out(r=a[0])
+        elif len(a) == 2 and a[0] == "goto" and a[1].isdigit():
+            out(r="goto", i=int(a[1]))
 for p in call("pane.list", {})["result"]["panes"]:
     if p.get("focused"):
-        out(f=p["pane_id"])
+        focused(p["pane_id"])
 threading.Thread(target=events, daemon=True).start()
 threading.Thread(target=requests, daemon=True).start()
 for ln in sys.stdin:
@@ -61,6 +75,11 @@ for ln in sys.stdin:
     if len(a) == 2 and a[0] == "focus":
         try: call("pane.focus", {"pane_id": a[1]})
         except Exception: pass
+    elif ln.startswith("hist "):  # the desk's history, so this machine's popup can list it
+        try:
+            with open(H + ".tmp", "w") as f: f.write(ln[5:])
+            os.replace(H + ".tmp", H)
+        except OSError: pass
 t.kill(); os._exit(0)
 '''
 
@@ -81,6 +100,13 @@ class History:
         del self.entries[:-LIMIT]
         self.at = len(self.entries) - 1
         return True
+
+    def goto(self, i):
+        """Straight to entry i (the list's choice): the place moves there, nothing is dropped."""
+        if isinstance(i, int) and 0 <= i < len(self.entries):
+            self.at = i
+            return self.entries[i]
+        return None
 
     def step(self, d):
         """Back (d=-1) or forward (d=1): the entry to go to, or None at either end."""
@@ -144,20 +170,31 @@ class Daemon:
         self.ms = machines()
         self.hosts = {h for h, _ in self.ms.values()}
         self.label = {h: lab for lab, (h, _) in self.ms.items()}
-        self.focused, self.links, self.shown, self.quiet = {}, {}, None, 0
+        self.focused, self.links, self.shown, self.quiet, self.meta = {}, {}, None, 0, {}
         self.lock = threading.Lock()
         try:
             with open(HISTORY) as f:
                 d = json.load(f)
             self.hist = History(d["entries"], d["at"])
+            self.meta = d.get("meta") or {}
         except (OSError, ValueError, KeyError, TypeError):
             self.hist = History()
 
     def save(self):
+        keep = {f"{h} {p}" for h, p in self.hist.entries}
+        self.meta = {k: v for k, v in self.meta.items() if k in keep}
+        text = json.dumps({"entries": self.hist.entries, "at": self.hist.at, "meta": self.meta})
         os.makedirs(STATE_DIR, exist_ok=True)
         with open(HISTORY + ".tmp", "w") as f:
-            json.dump({"entries": self.hist.entries, "at": self.hist.at}, f)
+            f.write(text)
         os.replace(HISTORY + ".tmp", HISTORY)
+        for host, p in list(self.links.items()):  # a copy on every machine, for its popup (prefix+shift+i)
+            if self.ms.get(self.label.get(host), (None, None))[1] and p.stdin:
+                try:
+                    p.stdin.write("hist " + text + "\n")
+                    p.stdin.flush()
+                except OSError:
+                    pass
 
     def record(self, host, pane):
         if pane and time.time() >= self.quiet and self.hist.record((host, pane)):
@@ -173,6 +210,9 @@ class Daemon:
             p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                  text=True, preexec_fn=die_with_parent)
             self.links[host] = p
+            if target:
+                with self.lock:
+                    self.save()  # its copy of the history, now rather than at the next jump
             for ln in p.stdout:
                 try:
                     d = json.loads(ln)
@@ -181,10 +221,15 @@ class Daemon:
                 with self.lock:
                     if "f" in d and PANE.match(d["f"]):
                         self.focused[host] = d["f"]
+                        if "ws" in d:
+                            self.meta[f"{host} {d['f']}"] = {"ws": str(d["ws"])[:60], "t": str(d.get("t", ""))[:120]}
                         if self.shown == host:  # you moved, in the window you are using
                             self.record(host, d["f"])
                     elif d.get("r") in ("back", "forward") and self.shown == host and not locked():
                         self.go(self.hist.step(-1 if d["r"] == "back" else 1))
+                        self.save()
+                    elif d.get("r") == "goto" and self.shown == host and not locked():
+                        self.go(self.hist.goto(d.get("i", -1)))
                         self.save()
             self.links.pop(host, None)
             p.wait()
@@ -244,16 +289,112 @@ def daemon():
     Daemon().run()
 
 
+def request(line):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(REQUESTS, "a") as f:
+        f.write(line + "\n")
+    try:
+        if os.path.getsize(REQUESTS) > 64 * 1024:
+            open(REQUESTS, "w").close()
+    except OSError:
+        pass
+
+
+def rows(d):
+    """The list's lines, newest first: (index, marker, host, workspace, title)."""
+    meta = d.get("meta") or {}
+    out = []
+    for i in range(len(d["entries"]) - 1, -1, -1):
+        h, p = d["entries"][i]
+        m = meta.get(f"{h} {p}") or {}
+        out.append((i, ">" if i == d["at"] else " ", h, m.get("ws") or "?", m.get("t") or p))
+    return out
+
+
+DRACULA = {"host": (141, 5), "ws": (117, 6), "title": (188, 7), "help": (103, 8), "select": (231, 7), "selectbg": (239, 4)}
+
+
+def ui(scr):
+    curses.curs_set(0)
+    curses.use_default_colors()
+    C = {}
+    if curses.has_colors():
+        pick = lambda n: DRACULA[n][0 if curses.COLORS >= 256 else 1]
+        for n, (name, bg) in enumerate([("host", -1), ("ws", -1), ("title", -1), ("help", -1), ("select", "selectbg")], 1):
+            try:
+                curses.init_pair(n, pick(name), -1 if bg == -1 else pick(bg))
+                C[name] = curses.color_pair(n)
+            except curses.error:
+                pass
+    try:
+        with open(HISTORY) as f:
+            r = rows(json.load(f))
+    except (OSError, ValueError, KeyError):
+        r = []
+    sel = next((n for n, e in enumerate(r) if e[1] == ">"), 0)
+    top = 0
+    def put(y, x, text, attr=0):
+        h, w = scr.getmaxyx()
+        if 0 <= y < h and x < w - 1:
+            try:
+                scr.addstr(y, x, text[:w - 1 - x], attr)
+            except curses.error:
+                pass
+        return x + len(text)
+    while True:
+        h, w = scr.getmaxyx()
+        n = max(1, h - 3)
+        top = min(max(top, sel - n + 1), sel)
+        scr.erase()
+        put(0, 1, "Jump history: newest first, > is where you are", curses.A_BOLD)
+        if not r:
+            put(2, 1, "Empty: the daemon writes it here as you move (herdr-oldinout on the machine you sit at).")
+        for y, (i, mark, host, ws, title) in enumerate(r[top:top + n], 2):
+            on = top + y - 2 == sel
+            base = C.get("select", curses.A_REVERSE) if on else 0
+            if on:
+                put(y, 0, " " * (w - 1), base)
+            x = put(y, 1, f"{mark} ", base | curses.A_BOLD)
+            x = put(y, x, f"{host:<12} ", base if on else C.get("host", 0))
+            x = put(y, x, f"{ws[:24]:<24} ", base if on else C.get("ws", 0))
+            put(y, x, title, base if on else C.get("title", 0))
+        put(h - 1, 1, "j/k ↑/↓ move   g/G top/bottom   Enter jump   q/Esc close", C.get("help", curses.A_DIM))
+        scr.refresh()
+        c = scr.getch()
+        if c in (ord("q"), 27):
+            return
+        if c in (ord("j"), curses.KEY_DOWN):
+            sel = min(sel + 1, len(r) - 1)
+        elif c in (ord("k"), curses.KEY_UP):
+            sel = max(sel - 1, 0)
+        elif c in (ord("g"), curses.KEY_HOME):
+            sel = 0
+        elif c in (ord("G"), curses.KEY_END):
+            sel = max(len(r) - 1, 0)
+        elif c == curses.KEY_NPAGE:
+            sel = min(sel + n, len(r) - 1)
+        elif c == curses.KEY_PPAGE:
+            sel = max(sel - n, 0)
+        elif c in (10, 13, curses.KEY_ENTER) and r:
+            request(f"goto {r[sel][0]}")
+            return
+
+
 def main(cmd):
     if cmd in ("back", "forward"):
-        os.makedirs(STATE_DIR, exist_ok=True)
-        with open(REQUESTS, "a") as f:
-            f.write(cmd + "\n")
-        try:
-            if os.path.getsize(REQUESTS) > 64 * 1024:
-                open(REQUESTS, "w").close()
-        except OSError:
-            pass
+        request(cmd)
+    elif cmd == "ui":
+        os.environ.setdefault("ESCDELAY", "25")
+        curses.wrapper(ui)
+    elif cmd == "pick":
+        with socket.socket(socket.AF_UNIX) as sk:
+            sk.connect(os.environ["HERDR_SOCKET_PATH"])
+            sk.sendall((json.dumps({"id": "oldinout", "method": "plugin.pane.open", "params": {
+                "plugin_id": os.environ["HERDR_PLUGIN_ID"], "entrypoint": "ui", "focus": True,
+                "width": "90%", "height": "80%"}}) + "\n").encode())
+            resp = json.loads(sk.makefile().readline())
+        if "error" in resp:
+            sys.exit(f"herdr-theoldinout: plugin.pane.open: {resp['error']}")
     elif cmd == "daemon":
         daemon()
     elif cmd == "history":
