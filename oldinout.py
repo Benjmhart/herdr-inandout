@@ -13,13 +13,14 @@ streams that server's `pane.focused` events and its back/forward requests, and f
 any change of the focused pane, or of the machine the herdr window shows. Going to another machine drives the window's
 Goto picker (prefix+a, /, its label, Enter), as herdr-queues does. Standard library only.
 """
-import curses, json, os, re, socket, subprocess, sys, threading, time
+import curses, glob, json, os, re, socket, subprocess, sys, threading, time
 
 PLUGIN = "benjmhart.oldinout"
 STATE_ROOT = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
 STATE_DIR = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.join(STATE_ROOT, "herdr/plugins", PLUGIN)
 REQUESTS = os.path.join(STATE_DIR, "requests")
-HISTORY = os.path.join(STATE_DIR, "history.json")
+HISTORY = os.path.join(STATE_DIR, "history.json")  # the daemon's own; copies for the list: history.<desk>.json
+DESK = socket.gethostname()
 HERDR = os.environ.get("HERDR_BIN_PATH", "herdr")
 PANE = re.compile(r"^[\w:.-]{1,64}$")
 LIMIT = 200
@@ -30,7 +31,8 @@ AGENT = r'''
 import json, os, socket, subprocess, sys, threading
 P = os.environ.get("HERDR_SOCKET_PATH") or os.path.expanduser("~/.config/herdr/herdr.sock")
 R = os.path.expanduser("~/.local/state/herdr/plugins/benjmhart.oldinout/requests")
-H = os.path.join(os.path.dirname(R), "history.json")
+D = os.path.dirname(R)
+NAME = lambda d: d.replace(".", "").replace("-", "").replace("_", "").isalnum() and len(d) < 64
 lock = threading.Lock()
 def out(**k):
     with lock:
@@ -63,8 +65,8 @@ def requests():
         a = ln.split()
         if a in (["back"], ["forward"]):
             out(r=a[0])
-        elif len(a) == 2 and a[0] == "goto" and a[1].isdigit():
-            out(r="goto", i=int(a[1]))
+        elif len(a) == 3 and a[0] == "goto" and NAME(a[1]) and a[2].isdigit():
+            out(r="goto", desk=a[1], i=int(a[2]))
 for p in call("pane.list", {})["result"]["panes"]:
     if p.get("focused"):
         focused(p["pane_id"])
@@ -75,10 +77,12 @@ for ln in sys.stdin:
     if len(a) == 2 and a[0] == "focus":
         try: call("pane.focus", {"pane_id": a[1]})
         except Exception: pass
-    elif ln.startswith("hist "):  # the desk's history, so this machine's popup can list it
+    elif len(a) >= 3 and a[0] == "hist" and NAME(a[1]):  # a desk's history, for this machine's popup to list
         try:
-            with open(H + ".tmp", "w") as f: f.write(ln[5:])
-            os.replace(H + ".tmp", H)
+            h = os.path.join(D, "history." + a[1] + ".json")
+            os.makedirs(D, exist_ok=True)
+            with open(h + ".tmp", "w") as f: f.write(ln.split(" ", 2)[2])
+            os.replace(h + ".tmp", h)
         except OSError: pass
 t.kill(); os._exit(0)
 '''
@@ -188,10 +192,10 @@ class Daemon:
         with open(HISTORY + ".tmp", "w") as f:
             f.write(text)
         os.replace(HISTORY + ".tmp", HISTORY)
-        for host, p in list(self.links.items()):  # a copy on every machine, for its popup (prefix+shift+i)
-            if self.ms.get(self.label.get(host), (None, None))[1] and p.stdin:
+        for p in list(self.links.values()):  # a copy on every machine (this one too), for its list (prefix+shift+i)
+            if p.stdin:
                 try:
-                    p.stdin.write("hist " + text + "\n")
+                    p.stdin.write(f"hist {DESK} {text}\n")
                     p.stdin.flush()
                 except OSError:
                     pass
@@ -210,9 +214,8 @@ class Daemon:
             p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                  text=True, preexec_fn=die_with_parent)
             self.links[host] = p
-            if target:
-                with self.lock:
-                    self.save()  # its copy of the history, now rather than at the next jump
+            with self.lock:
+                self.save()  # its copy of the history, now rather than at the next jump
             for ln in p.stdout:
                 try:
                     d = json.loads(ln)
@@ -228,7 +231,7 @@ class Daemon:
                     elif d.get("r") in ("back", "forward") and self.shown == host and not locked():
                         self.go(self.hist.step(-1 if d["r"] == "back" else 1))
                         self.save()
-                    elif d.get("r") == "goto" and self.shown == host and not locked():
+                    elif d.get("r") == "goto" and d.get("desk") == DESK and self.shown == host and not locked():
                         self.go(self.hist.goto(d.get("i", -1)))
                         self.save()
             self.links.pop(host, None)
@@ -326,10 +329,13 @@ def ui(scr):
                 C[name] = curses.color_pair(n)
             except curses.error:
                 pass
+    # One copy per desk running a daemon: the newest is the desk you are using (it records your jumps).
+    copies = sorted(glob.glob(os.path.join(STATE_DIR, "history.*.json")), key=os.path.getmtime)
+    desk = os.path.basename(copies[-1])[8:-5] if copies else ""
     try:
-        with open(HISTORY) as f:
+        with open(copies[-1]) as f:
             r = rows(json.load(f))
-    except (OSError, ValueError, KeyError):
+    except (IndexError, OSError, ValueError, KeyError):
         r = []
     sel = next((n for n, e in enumerate(r) if e[1] == ">"), 0)
     top = 0
@@ -376,7 +382,7 @@ def ui(scr):
         elif c == curses.KEY_PPAGE:
             sel = max(sel - n, 0)
         elif c in (10, 13, curses.KEY_ENTER) and r:
-            request(f"goto {r[sel][0]}")
+            request(f"goto {desk} {r[sel][0]}")
             return
 
 

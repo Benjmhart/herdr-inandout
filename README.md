@@ -54,8 +54,9 @@ The keys run on the server the window shows, which may have no way back to your 
 the far end a small helper streams that server's `pane.focused` events and those requests, and focuses panes on
 command (`pane.focus`). The daemon records a jump when the focused pane changes in the window you are using, or the
 window switches machine, with the workspace and pane names as they were then. After each change it writes a copy of
-the history to every machine through the same pipes, so the list (`prefix+shift+i`, a popup on whichever machine the
-window shows) reads it locally; Enter sends `goto N` back the way `back`/`forward` go. Choosing from the list moves
+the history to every machine through the same pipes (`history.<desk>.json`, one per machine running a daemon), so the
+list (`prefix+shift+i`, a popup on whichever machine the window shows) reads the newest copy locally; Enter sends
+`goto <desk> N` back the way `back`/`forward` go, and only that desk's daemon acts on it. Choosing from the list moves
 your place in the history without dropping anything. To go to another machine it drives the window's Goto picker (`prefix+a`, `/`, the machine's
 label, Enter), as [herdr-queues](https://github.com/Benjmhart/herdr-queues) does.
 
