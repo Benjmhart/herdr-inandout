@@ -1,0 +1,16 @@
+id = "benjmhart.oldinout"
+name = "The Old In-Out"
+version = "0.1.0"
+min_herdr_version = "0.9.3"
+description = "vim's jump list for herdr, across every machine: prefix+o back to where you were, prefix+i forward"
+platforms = ["linux"]
+
+[[actions]]
+id = "back"
+title = "Jump back (older)"
+command = ["python3", "oldinout.py", "back"]
+
+[[actions]]
+id = "forward"
+title = "Jump forward (newer)"
+command = ["python3", "oldinout.py", "forward"]
