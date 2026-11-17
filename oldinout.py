@@ -11,7 +11,7 @@ were, prefix+i forward again.
 How: the daemon keeps one ssh pipe per machine in `herdr machine list` (plus this one). At the far end a small helper
 streams that server's `pane.focused` events and its back/forward requests, and focuses panes when told to. A jump is
 any change of the focused pane, or of the machine the herdr window shows. Going to another machine drives the window's
-Goto picker (prefix+a, /, its label, Enter), as herdr-queues does. Standard library only.
+Goto picker (its Goto keys from herdr's config, /, its label, Enter), as herdr-queues does. Standard library only.
 """
 import glob, json, os, re, socket, subprocess, sys, threading, time
 try:
@@ -167,17 +167,54 @@ class History:
 # --- herdr and the window -----------------------------------------------------------------------------------------
 
 def machines():
-    """{label: (hostname, ssh target)} of the enabled machines; "" is this server."""
-    out = {"": (socket.gethostname(), None)}
+    """{label: (hostname, ssh target)} of the enabled machines; "" is this server. The hostname is what that machine
+    calls itself (its window title says it), asked over ssh at start; guessed from the target ("user@carbon.lan" ->
+    "carbon") only for a machine that doesn't answer, which is wrong for an alias (WSL as "wsl" is "wsl-arch",
+    station-maintenance fleet 37, 2026-11-17). ponytail: asked once per daemon start; restart it after a rename."""
+    out, targets = {"": (socket.gethostname(), None)}, {}
     try:
         r = subprocess.run([HERDR, "machine", "list"], capture_output=True, text=True, timeout=10)
         for ln in r.stdout.splitlines():
             f = ln.split("\t")
             if len(f) >= 5 and f[4] == "enabled":
-                out[f[1]] = (f[2].split("@")[-1].split(".")[0], f[2])
+                targets[f[1]] = f[2]
     except (OSError, subprocess.TimeoutExpired):
         pass
+    names = {}
+    def ask(t):
+        try:
+            names[t] = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", t, "uname -n"],
+                                      capture_output=True, text=True, timeout=20).stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    ts = [threading.Thread(target=ask, args=(t,)) for t in set(targets.values())]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    for lab, t in targets.items():
+        out[lab] = (names.get(t) or t.split("@")[-1].split(".")[0], t)
     return out
+
+
+def goto_keys():
+    """The keys that open Goto in this desk's herdr client (its config.toml), e.g. ["ctrl+b", "g"]; None when that
+    can't be known. herdr's default is prefix+g (as herdr-queues reads it)."""
+    try:
+        import tomllib
+        cfg = os.path.join(os.environ["APPDATA"] if WIN else os.environ.get("XDG_CONFIG_HOME") or
+                           os.path.expanduser("~/.config"), "herdr", "config.toml")
+        try:
+            with open(cfg, "rb") as f:
+                k = tomllib.load(f).get("keys", {})
+        except FileNotFoundError:
+            k = {}
+        goto = k.get("goto", "prefix+g")
+        goto = goto if isinstance(goto, list) else [goto]
+        g = next(g for g in goto if g)
+        return [k.get("prefix", "ctrl+b"), g.removeprefix("prefix+")] if g.startswith("prefix+") else [g]
+    except (ImportError, ValueError, StopIteration, AttributeError, TypeError):  # tomllib: Python 3.11+
+        return None
 
 
 def x11(*args):
@@ -398,10 +435,11 @@ class Daemon:
         host, pane = e
         self.quiet = time.time() + QUIET
         win = active()
-        if self.shown != host and host in self.label:
+        g = goto_keys()
+        if self.shown != host and host in self.label and g:  # no Goto keys known: no blind keys either
             label = self.label[host]
             activate(win)
-            keys("ctrl+b", "a", "slash")
+            keys(*g, "slash")
             typ(label or "local")
             keys("Return")
             for _ in range(30):

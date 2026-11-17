@@ -50,8 +50,9 @@ Install the plugin on every machine you reach, too: the keys run on the machine 
 
 ### Windows
 
-Runs on herdr's Windows build (tested on Windows 11, herdr 0.9.5: the daemon, history and back). Windows' own `python3` is a Microsoft Store
-stub: install Python with python.org's **Python install manager**, which answers to `python3`. The list needs `python3 -m pip install windows-curses`. Start the daemon at logon without a console window (`pythonw <the plugin's folder>\oldinout.py daemon`); it drives Windows Terminal with user32 and SendKeys through one resident PowerShell. The other machines it reaches over ssh run Linux or macOS. Under WSL the same driver goes through `powershell.exe` (untested). Going to another machine (Goto) is not yet seen end to end on Windows.
+Runs on herdr's Windows build (tested on Windows 11, herdr 0.9.5: the daemon, history, and back across machines, to a
+WSL Arch and back to Windows). Windows' own `python3` is a Microsoft Store
+stub: install Python with python.org's **Python install manager**, which answers to `python3`. The list needs `python3 -m pip install windows-curses`. Start the daemon at logon without a console window (`pythonw <the plugin's folder>\oldinout.py daemon`); it drives Windows Terminal with user32 and SendKeys through one resident PowerShell. The other machines it reaches over ssh run Linux or macOS; a WSL distro on the same PC is one (`herdr machine add`). Under WSL the same driver goes through `powershell.exe` (herdr-queues' copy of it is tested there; this plugin's is not yet).
 
 ## How it works
 
@@ -63,10 +64,10 @@ window switches machine, with the workspace and pane names as they were then. Af
 the history to every machine through the same pipes (`history.<desk>.json`, one per machine running a daemon), so the
 list (`prefix+shift+i`, a popup on whichever machine the window shows) reads the newest copy locally; Enter sends
 `goto <desk> N` back the way `back`/`forward` go, and only that desk's daemon acts on it. Choosing from the list moves
-your place in the history without dropping anything. To go to another machine it drives the window's Goto picker (`prefix+a`, `/`, the machine's
-label, Enter), as [herdr-queues](https://github.com/Benjmhart/herdr-queues) does.
+your place in the history without dropping anything. To go to another machine it drives the window's Goto picker (its Goto keys from herdr's
+`config.toml`, default `prefix+g`; `/`, the machine's label, Enter), as [herdr-queues](https://github.com/Benjmhart/herdr-queues) does.
 
-Needs X11 and `xdotool`, the Goto picker on `prefix+a` with `prefix` = ctrl+b, herdr's window title in its default
+Needs X11 and `xdotool`, herdr's window title in its default
 shape (`{hostname}: {workspace}`, a `herdr: ` prefix is fine), and python3 on every machine. A request is ignored
 while the screen is locked. `oldinout.py history` prints the list (`>` marks where you are).
 
