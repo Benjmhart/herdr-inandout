@@ -13,10 +13,26 @@ streams that server's `pane.focused` events and its back/forward requests, and f
 any change of the focused pane, or of the machine the herdr window shows. Going to another machine drives the window's
 Goto picker (prefix+a, /, its label, Enter), as herdr-queues does. Standard library only.
 """
-import curses, glob, json, os, re, socket, subprocess, sys, threading, time
+import glob, json, os, re, socket, subprocess, sys, threading, time
+try:
+    import curses
+except ImportError:  # Windows Python ships none: the list needs `py -m pip install windows-curses`
+    curses = None
+
+WIN = os.name == "nt"  # native Windows: herdr's socket is a named pipe; no fcntl, tail or getuid
+
+# Windows before Python 3.15 reads files and subprocess output as cp1252: run again in UTF-8 mode (a child: herdr waits)
+if WIN and not sys.flags.utf8_mode and __name__ == "__main__":
+    sys.exit(subprocess.call([sys.executable, "-X", "utf8", *sys.argv]))
+
+if WIN:  # no console window flashing up for each child of a windowless (pythonw) desk process; none needs one
+    _popen = subprocess.Popen.__init__
+    subprocess.Popen.__init__ = lambda self, *a, creationflags=0, **k: _popen(
+        self, *a, creationflags=creationflags | subprocess.CREATE_NO_WINDOW, **k)
 
 PLUGIN = "benjmhart.oldinout"
-STATE_ROOT = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+STATE_ROOT = (os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")) if os.name != "nt" else \
+    os.environ["LOCALAPPDATA"]  # where herdr puts plugin state on Windows (HERDR_PLUGIN_STATE_DIR, herdr 0.9.5)
 STATE_DIR = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.join(STATE_ROOT, "herdr/plugins", PLUGIN)
 REQUESTS = os.path.join(STATE_DIR, "requests")
 HISTORY = os.path.join(STATE_DIR, "history.json")  # the daemon's own; copies for the list: history.<desk>.json
@@ -29,18 +45,28 @@ QUIET = 2.0  # seconds after our own jump in which focus changes are its side ef
 # Runs on each machine (python3 -c): one line of JSON per focus change or request; "focus <pane>" on stdin focuses.
 AGENT = r'''
 import json, os, socket, subprocess, sys, threading
-P = os.environ.get("HERDR_SOCKET_PATH") or os.path.expanduser("~/.config/herdr/herdr.sock")
-R = os.path.expanduser("~/.local/state/herdr/plugins/benjmhart.oldinout/requests")
+P = os.environ.get("HERDR_SOCKET_PATH") or (os.path.join(os.environ["APPDATA"], "herdr", "herdr.sock") if os.name == "nt"
+                                             else os.path.expanduser("~/.config/herdr/herdr.sock"))
+if os.name == "nt" and not P.startswith("\\\\.\\pipe\\"):  # a path-shaped name in the pipe namespace
+    P = "\\\\.\\pipe\\" + P
+R = os.path.join(os.environ["LOCALAPPDATA"] if os.name == "nt" else os.path.expanduser("~/.local/state"),
+                 "herdr", "plugins", "benjmhart.oldinout", "requests")
 D = os.path.dirname(R)
 NAME = lambda d: d.replace(".", "").replace("-", "").replace("_", "").isalnum() and len(d) < 64
 lock = threading.Lock()
 def out(**k):
     with lock:
         sys.stdout.write(json.dumps(k) + "\n"); sys.stdout.flush()
+def conn():
+    """herdr's socket: a Unix socket, or on Windows a named pipe. A file-like object for lines both ways."""
+    if os.name == "nt":
+        return open(P, "r+b", buffering=0)
+    s = socket.socket(socket.AF_UNIX); s.connect(P)
+    return s.makefile("rwb", buffering=0)
 def call(method, params):
-    with socket.socket(socket.AF_UNIX) as s:
-        s.connect(P); s.sendall((json.dumps({"id": "oio", "method": method, "params": params}) + "\n").encode())
-        return json.loads(s.makefile().readline())
+    with conn() as c:
+        c.write((json.dumps({"id": "oio", "method": method, "params": params}) + "\n").encode())
+        return json.loads(c.readline())
 def focused(pane):
     """The pane, with its workspace and title as they are now (the list shows them later)."""
     try:
@@ -50,18 +76,35 @@ def focused(pane):
     except Exception:
         out(f=pane)
 def events():
-    s = socket.socket(socket.AF_UNIX); s.connect(P)
-    s.sendall((json.dumps({"id": "oio", "method": "events.subscribe",
-                           "params": {"subscriptions": [{"type": "pane.focused"}]}}) + "\n").encode())
-    for ln in s.makefile():
+    c = conn()
+    c.write((json.dumps({"id": "oio", "method": "events.subscribe",
+                         "params": {"subscriptions": [{"type": "pane.focused"}]}}) + "\n").encode())
+    for ln in iter(c.readline, b""):
         d = json.loads(ln)
         if d.get("event") == "pane_focused":
             focused(d["data"]["pane_id"])
     os._exit(1)
 os.makedirs(os.path.dirname(R), exist_ok=True); open(R, "a").close()
-t = subprocess.Popen(["tail", "-n0", "-F", R], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+def tail(p):  # tail -n0 -F, which Windows lacks
+    import time
+    f, buf = open(p), ""
+    f.seek(0, 2)
+    while True:
+        chunk = f.read()
+        if chunk:
+            buf += chunk
+            while "\n" in buf:
+                ln, buf = buf.split("\n", 1)
+                yield ln
+            continue
+        try:
+            if os.path.getsize(p) < f.tell():
+                f.seek(0); buf = ""
+        except OSError:
+            pass
+        time.sleep(0.2)
 def requests():
-    for ln in t.stdout:
+    for ln in tail(R):
         a = ln.split()
         if a in (["back"], ["forward"]):
             out(r=a[0])
@@ -84,7 +127,7 @@ for ln in sys.stdin:
             with open(h + ".tmp", "w") as f: f.write(ln.split(" ", 2)[2])
             os.replace(h + ".tmp", h)
         except OSError: pass
-t.kill(); os._exit(0)
+os._exit(0)
 '''
 
 
@@ -145,13 +188,124 @@ def x11(*args):
         return ""
 
 
+# Windows, natively or from WSL (powershell.exe through WSL's interop): user32 and SendKeys, as herdr-queues does
+# (station-maintenance fleet 37, 2026-11-16).
+def windows_desktop():
+    if WIN:
+        return True
+    try:
+        with open("/proc/version") as f:
+            return "microsoft" in f.read().lower()
+    except OSError:
+        return False
+
+
+WINPS = r'''
+Add-Type -TypeDefinition @"
+using System; using System.Text; using System.Runtime.InteropServices;
+public class HQ {
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+}
+"@
+function Main($op, $arg) {
+  if ($op -eq "active") { [long][HQ]::GetForegroundWindow() }
+  elseif ($op -eq "title") { $sb = New-Object Text.StringBuilder 512; [void][HQ]::GetWindowText([IntPtr][long]$arg, $sb, 512); $sb.ToString() }
+  elseif ($op -eq "activate") {
+    [HQ]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero); [HQ]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+    [void][HQ]::SetForegroundWindow([IntPtr][long]$arg) }
+  elseif ($op -eq "keys") {  # one key per line, apart: herdr misses a prefix sent in one burst
+    Add-Type -AssemblyName System.Windows.Forms
+    foreach ($k in $arg -split "`n") { [System.Windows.Forms.SendKeys]::SendWait($k); Start-Sleep -Milliseconds 150 } }
+  elseif ($op -eq "locked") { if (Get-Process LogonUI -ErrorAction SilentlyContinue) { "1" } else { "0" } }
+}
+# One operation per stdin line, "<op><tab><base64 UTF-8 arg>"; its output, then the end marker.
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+while ($null -ne ($line = [Console]::In.ReadLine())) {
+  $op, $b = $line -split "`t", 2
+  try { $r = Main $op ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b))) | Out-String } catch { $r = "" }
+  [Console]::Out.Write($r); [Console]::Out.WriteLine("--hq-end--"); [Console]::Out.Flush()
+}
+'''
+
+
+WINPS_PROC, WINPS_LOCK = [None], threading.Lock()
+
+
+def winps(op, arg=""):
+    """One WINPS operation in this process's resident PowerShell (the daemon polls the window every 0.4 s; starting
+    one costs ~0.3 s): its output, "" on failure. A call stuck 30 s (90 s with the start) kills it; never re-sent."""
+    import base64
+    with WINPS_LOCK:
+        p, wait = WINPS_PROC[0], 30
+        try:
+            if p is None or p.poll() is not None:
+                wait = 90
+                p = WINPS_PROC[0] = subprocess.Popen(
+                    ["powershell" if WIN else "powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                     base64.b64encode(WINPS.encode("utf-16-le")).decode()],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, encoding="utf-8")
+            p.stdin.write(op + "\t" + base64.b64encode(str(arg).encode()).decode() + "\n")
+            p.stdin.flush()
+            guard = threading.Timer(wait, p.kill)
+            guard.start()
+            out = []
+            for ln in p.stdout:
+                if ln.rstrip("\r\n") == "--hq-end--":
+                    guard.cancel()
+                    return "".join(out)
+                out.append(ln)
+            guard.cancel()
+        except OSError:
+            pass
+        WINPS_PROC[0] = None
+        return ""
+
+
+SENDKEYS = {"slash": "/", "Return": "{ENTER}", "ctrl": "^", "shift": "+", "alt": "%"}
+
+
+def sendkeys(text=None, names=()):
+    """SendKeys syntax: literal text escaped, or key names ("ctrl+b", "slash", "Return")."""
+    esc = lambda c: "{%s}" % c if c in "+^%~(){}[]" else c
+    if text is not None:
+        return "".join(esc(c) for c in text)
+    return "".join("".join(SENDKEYS[m] for m in n.split("+")[:-1]) + esc(SENDKEYS.get(n.split("+")[-1], n.split("+")[-1]))
+                   for n in names)
+
+
+# The window you are using, by desktop: X11 (xdotool) or Windows.
+def active():
+    return winps("active").strip() if windows_desktop() else x11("getactivewindow").strip()
+
+
+def title(win):
+    return winps("title", win).strip() if windows_desktop() else x11("getwindowname", win).strip()
+
+
+def activate(win):
+    winps("activate", win) if windows_desktop() else x11("windowactivate", "--sync", win)
+
+
+def keys(*names):
+    winps("keys", "\n".join(sendkeys(names=[n]) for n in names)) if windows_desktop() else x11("key", "--clearmodifiers", *names)
+
+
+def typ(text):
+    winps("keys", sendkeys(text)) if windows_desktop() else x11("type", "--delay", "8", text)
+
+
 def shows(win, hosts):
     """The host a herdr window shows, from its title "[herdr: ]<hostname>: <workspace>"; None if not a herdr window."""
-    h = x11("getwindowname", win).strip().removeprefix("herdr: ").split(": ", 1)[0]
-    return h if h in hosts else None
+    h = title(win).removeprefix("herdr: ").split(": ", 1)[0].lower()  # Windows: the upper-case computer name
+    return next((x for x in hosts if x.lower() == h), None)
 
 
 def locked():
+    if windows_desktop():
+        return winps("locked").strip() == "1"
     try:
         return subprocess.run(["pgrep", "-x", "-u", str(os.getuid()), "xsecurelock|i3lock|slock|swaylock|xlock"],
                               capture_output=True).returncode == 0
@@ -212,7 +366,7 @@ class Daemon:
             "PATH=$HOME/.local/bin:$PATH python3 -c " + "'" + AGENT.replace("'", "'\\''") + "'"]
         while True:
             p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                 text=True, preexec_fn=die_with_parent)
+                                 text=True, **({} if WIN else {"preexec_fn": die_with_parent}))
             self.links[host] = p
             with self.lock:
                 self.save()  # its copy of the history, now rather than at the next jump
@@ -243,13 +397,13 @@ class Daemon:
             return
         host, pane = e
         self.quiet = time.time() + QUIET
-        win = x11("getactivewindow").strip()
+        win = active()
         if self.shown != host and host in self.label:
             label = self.label[host]
-            x11("windowactivate", "--sync", win)
-            x11("key", "--clearmodifiers", "ctrl+b", "a", "slash")
-            x11("type", "--delay", "8", label or "local")
-            x11("key", "Return")
+            activate(win)
+            keys("ctrl+b", "a", "slash")
+            typ(label or "local")
+            keys("Return")
             for _ in range(30):
                 time.sleep(0.1)
                 if shows(win, {host}):
@@ -267,7 +421,7 @@ class Daemon:
     def watch_window(self):
         """Which machine the window you are using shows; switching it is a jump too."""
         while True:
-            win = x11("getactivewindow").strip()
+            win = active()
             h = shows(win, self.hosts) if win else None
             with self.lock:
                 if h and h != self.shown:
@@ -282,11 +436,15 @@ class Daemon:
 
 
 def daemon():
-    import fcntl
     os.makedirs(STATE_DIR, exist_ok=True)
     lock = open(os.path.join(STATE_DIR, "daemon.lock"), "w")
     try:  # one per user: two would both type into the window
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if WIN:
+            import msvcrt
+            msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
         sys.exit("herdr-theoldinout: a daemon is already running")
     Daemon().run()
@@ -386,19 +544,33 @@ def ui(scr):
             return
 
 
+def pipe(p):
+    """herdr's socket on Windows: HERDR_SOCKET_PATH is a path-shaped name in the pipe namespace (herdr 0.9.5)."""
+    return p if p.startswith("\\\\.\\pipe\\") else "\\\\.\\pipe\\" + p
+
+
 def main(cmd):
     if cmd in ("back", "forward"):
         request(cmd)
     elif cmd == "ui":
         os.environ.setdefault("ESCDELAY", "25")
+        if curses is None:
+            input("herdr-theoldinout: the list needs curses. On Windows: py -m pip install windows-curses\n(Enter closes) ")
+            return
         curses.wrapper(ui)
     elif cmd == "pick":
-        with socket.socket(socket.AF_UNIX) as sk:
-            sk.connect(os.environ["HERDR_SOCKET_PATH"])
-            sk.sendall((json.dumps({"id": "oldinout", "method": "plugin.pane.open", "params": {
-                "plugin_id": os.environ["HERDR_PLUGIN_ID"], "entrypoint": "ui", "focus": True,
-                "width": "90%", "height": "80%"}}) + "\n").encode())
-            resp = json.loads(sk.makefile().readline())
+        line = (json.dumps({"id": "oldinout", "method": "plugin.pane.open", "params": {
+            "plugin_id": os.environ["HERDR_PLUGIN_ID"], "entrypoint": "ui", "focus": True,
+            "width": "90%", "height": "80%"}}) + "\n").encode()
+        if WIN:  # a named pipe there
+            with open(pipe(os.environ["HERDR_SOCKET_PATH"]), "r+b", buffering=0) as f:
+                f.write(line)
+                resp = json.loads(f.readline())
+        else:
+            with socket.socket(socket.AF_UNIX) as sk:
+                sk.connect(os.environ["HERDR_SOCKET_PATH"])
+                sk.sendall(line)
+                resp = json.loads(sk.makefile().readline())
         if "error" in resp:
             sys.exit(f"herdr-theoldinout: plugin.pane.open: {resp['error']}")
     elif cmd == "daemon":

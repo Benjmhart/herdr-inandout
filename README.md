@@ -47,6 +47,12 @@ python3 "$(ls -dt ~/.config/herdr/plugins/github-installations/benjmhart.oldinou
 
 Install the plugin on every machine you reach, too: the keys run on the machine the window is showing.
 
+
+### Windows
+
+Runs on herdr's Windows build (tested on Windows 11, herdr 0.9.5: the daemon, history and back). Windows' own `python3` is a Microsoft Store
+stub: install Python with python.org's **Python install manager**, which answers to `python3`. The list needs `python3 -m pip install windows-curses`. Start the daemon at logon without a console window (`pythonw <the plugin's folder>\oldinout.py daemon`); it drives Windows Terminal with user32 and SendKeys through one resident PowerShell. The other machines it reaches over ssh run Linux or macOS. Under WSL the same driver goes through `powershell.exe` (untested). Going to another machine (Goto) is not yet seen end to end on Windows.
+
 ## How it works
 
 The keys run on the server the window shows, which may have no way back to your screen, so they only write
