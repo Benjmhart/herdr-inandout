@@ -56,6 +56,14 @@ Runs on herdr's Windows build (tested on Windows 11, herdr 0.9.5: the daemon, hi
 WSL Arch and back to Windows). Windows' own `python3` is a Microsoft Store
 stub: install Python with python.org's **Python install manager**, which answers to `python3`. The list needs `python3 -m pip install windows-curses`. Start the daemon at logon without a console window (`pythonw <the plugin's folder>\oldinout.py daemon`); it drives Windows Terminal with user32 and SendKeys through one resident PowerShell. The other machines it reaches over ssh run Linux or macOS; a WSL distro on the same PC is one (`herdr machine add`). Under WSL the same driver goes through `powershell.exe` (herdr-queues' copy of it is tested there; this plugin's is not yet).
 
+### macOS
+
+Tested on Arch Linux and macOS 14 (Sonoma; an Intel VM, herdr 0.9.5, the Command Line Tools' `python3` 3.9.6) on
+2026-11-19: the tests, the keys (back, forward and the list popup, in an attached client) and the helper the daemon runs
+there (focus events, focus commands, requests, the history copy), run locally, not yet over ssh from a Linux desk.
+**Not on macOS:** the daemon: it needs X11 or Windows to see and drive the window, so on a Mac it records nothing. A
+Mac is a machine you reach from a Linux or Windows desk.
+
 ## How it works
 
 The keys run on the server the window shows, which may have no way back to your screen, so they only write

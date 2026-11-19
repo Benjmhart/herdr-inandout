@@ -21,13 +21,16 @@ assert h.goto(0) == ("a", "1") and h.at == 0 and len(h.entries) == 3   # the lis
 assert h.goto(9) is None and h.goto("1") is None and h.at == 0
 r = O.rows({"entries": [["a", "1"], ["b", "2"]], "at": 0, "meta": {"b 2": {"ws": "dots", "t": "vim"}}})
 assert r == [(1, " ", "b", "dots", "vim"), (0, ">", "a", "?", "1")]       # newest first; no names: the pane id
-import os, tempfile
-with tempfile.TemporaryDirectory() as t:                                   # the Goto keys from herdr's config
-    os.environ["APPDATA" if O.WIN else "XDG_CONFIG_HOME"] = t
-    assert O.goto_keys() == ["ctrl+b", "g"]                                # none: herdr's default
-    os.makedirs(f"{t}/herdr")
-    open(f"{t}/herdr/config.toml", "w").write('[keys]\nprefix = "ctrl+a"\ngoto = ["prefix+a", "prefix+g"]\n')
-    assert O.goto_keys() == ["ctrl+a", "a"]
-    open(f"{t}/herdr/config.toml", "w").write('[keys\n')
-    assert O.goto_keys() is None                                          # unreadable: no blind keys
+import os, sys, tempfile
+if sys.version_info < (3, 11):  # no tomllib (macOS's own python3 is 3.9): no Goto keys, so no blind keys
+    assert O.goto_keys() is None
+else:
+    with tempfile.TemporaryDirectory() as t:                                   # the Goto keys from herdr's config
+        os.environ["APPDATA" if O.WIN else "XDG_CONFIG_HOME"] = t
+        assert O.goto_keys() == ["ctrl+b", "g"]                                # none: herdr's default
+        os.makedirs(f"{t}/herdr")
+        open(f"{t}/herdr/config.toml", "w").write('[keys]\nprefix = "ctrl+a"\ngoto = ["prefix+a", "prefix+g"]\n')
+        assert O.goto_keys() == ["ctrl+a", "a"]
+        open(f"{t}/herdr/config.toml", "w").write('[keys\n')
+        assert O.goto_keys() is None                                          # unreadable: no blind keys
 print("ok")
