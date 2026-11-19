@@ -1,6 +1,6 @@
 id = "benjmhart.oldinout"
 name = "The Old In-Out"
-version = "0.3.1"
+version = "0.3.2"
 min_herdr_version = "0.9.3"
 description = "vim's jump list for herdr, across every machine: prefix+o back to where you were, prefix+i forward, prefix+shift+i the list"
 platforms = ["linux", "macos", "windows"]
