@@ -1,5 +1,7 @@
 # herdr-theoldinout
 
+![Three workspaces visited, prefix+o twice back to the first, then prefix+shift+i lists the history and Enter jumps to web-app](docs/demo.gif)
+
 A [herdr](https://herdr.dev) plugin: vim's jump list (`ctrl+o` / `ctrl+i`) for herdr, **across every machine your
 herdr window reaches** (`herdr machine list`). `prefix+o` takes you back to where you were, `prefix+i` forward again, and `prefix+shift+i` lists the history
 (workspace and pane names, newest first) so you can jump straight to any place in it.
