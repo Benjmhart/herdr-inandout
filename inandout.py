@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""herdr-theoldinout: vim's jump list for herdr, across every machine in the window. prefix+o goes back to where you
+"""herdr-inandout: vim's jump list for herdr, across every machine in the window. prefix+o goes back to where you
 were, prefix+i forward again.
 
-  oldinout.py back | forward   the plugin's actions: ask the daemon (they run on the machine the window shows)
-  oldinout.py daemon           run on the machine you sit at: keeps the history and carries out back/forward
-  oldinout.py history          print the daemon's history (the newest last, > at the current place)
-  oldinout.py pick             the plugin's action: open the history list in a popup (prefix+shift+i)
-  oldinout.py ui               the list itself: newest first, Enter jumps to the entry
+  inandout.py back | forward   the plugin's actions: ask the daemon (they run on the machine the window shows)
+  inandout.py daemon           run on the machine you sit at: keeps the history and carries out back/forward
+  inandout.py history          print the daemon's history (the newest last, > at the current place)
+  inandout.py pick             the plugin's action: open the history list in a popup (prefix+shift+i)
+  inandout.py ui               the list itself: newest first, Enter jumps to the entry
 
 How: the daemon keeps one ssh pipe per machine in `herdr machine list` (plus this one). At the far end a small helper
 streams that server's `pane.focused` events and its back/forward requests, and focuses panes when told to. A jump is
@@ -30,7 +30,7 @@ if WIN:  # no console window flashing up for each child of a windowless (pythonw
     subprocess.Popen.__init__ = lambda self, *a, creationflags=0, **k: _popen(
         self, *a, creationflags=creationflags | subprocess.CREATE_NO_WINDOW, **k)
 
-PLUGIN = "benjmhart.oldinout"
+PLUGIN = "benjmhart.inandout"
 STATE_ROOT = (os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")) if os.name != "nt" else \
     os.environ["LOCALAPPDATA"]  # where herdr puts plugin state on Windows (HERDR_PLUGIN_STATE_DIR, herdr 0.9.5)
 STATE_DIR = os.environ.get("HERDR_PLUGIN_STATE_DIR") or os.path.join(STATE_ROOT, "herdr/plugins", PLUGIN)
@@ -50,7 +50,7 @@ P = os.environ.get("HERDR_SOCKET_PATH") or (os.path.join(os.environ["APPDATA"], 
 if os.name == "nt" and not P.startswith("\\\\.\\pipe\\"):  # a path-shaped name in the pipe namespace
     P = "\\\\.\\pipe\\" + P
 R = os.path.join(os.environ["LOCALAPPDATA"] if os.name == "nt" else os.path.expanduser("~/.local/state"),
-                 "herdr", "plugins", "benjmhart.oldinout", "requests")
+                 "herdr", "plugins", "benjmhart.inandout", "requests")
 D = os.path.dirname(R)
 NAME = lambda d: d.replace(".", "").replace("-", "").replace("_", "").isalnum() and len(d) < 64
 lock = threading.Lock()
@@ -473,7 +473,18 @@ class Daemon:
         self.watch_window()
 
 
+def migrate(state_dir=STATE_DIR):
+    """Until 0.4.0 the plugin was benjmhart.oldinout (herdr-theoldinout): its history moves over once."""
+    old = os.path.join(os.path.dirname(state_dir), "benjmhart.oldinout")
+    if os.path.isdir(old) and not os.path.exists(os.path.join(state_dir, "history.json")):
+        os.makedirs(state_dir, exist_ok=True)
+        for n in os.listdir(old):
+            if n.startswith("history") and n.endswith(".json"):
+                os.replace(os.path.join(old, n), os.path.join(state_dir, n))
+
+
 def daemon():
+    migrate()
     os.makedirs(STATE_DIR, exist_ok=True)
     lock = open(os.path.join(STATE_DIR, "daemon.lock"), "w")
     try:  # one per user: two would both type into the window
@@ -484,7 +495,7 @@ def daemon():
             import fcntl
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        sys.exit("herdr-theoldinout: a daemon is already running")
+        sys.exit("herdr-inandout: a daemon is already running")
     Daemon().run()
 
 
@@ -550,7 +561,7 @@ def ui(scr):
         scr.erase()
         put(0, 1, "Jump history: newest first, > is where you are", curses.A_BOLD)
         if not r:
-            put(2, 1, "Empty: the daemon writes it here as you move (herdr-oldinout on the machine you sit at).")
+            put(2, 1, "Empty: the daemon writes it here as you move (herdr-inandout on the machine you sit at).")
         for y, (i, mark, host, ws, title) in enumerate(r[top:top + n], 2):
             on = top + y - 2 == sel
             base = C.get("select", curses.A_REVERSE) if on else 0
@@ -593,11 +604,11 @@ def main(cmd):
     elif cmd == "ui":
         os.environ.setdefault("ESCDELAY", "25")
         if curses is None:
-            input("herdr-theoldinout: the list needs curses. On Windows: py -m pip install windows-curses\n(Enter closes) ")
+            input("herdr-inandout: the list needs curses. On Windows: py -m pip install windows-curses\n(Enter closes) ")
             return
         curses.wrapper(ui)
     elif cmd == "pick":
-        line = (json.dumps({"id": "oldinout", "method": "plugin.pane.open", "params": {
+        line = (json.dumps({"id": "inandout", "method": "plugin.pane.open", "params": {
             "plugin_id": os.environ["HERDR_PLUGIN_ID"], "entrypoint": "ui", "focus": True,
             "width": "90%", "height": "80%"}}) + "\n").encode()
         if WIN:  # a named pipe there
@@ -610,7 +621,7 @@ def main(cmd):
                 sk.sendall(line)
                 resp = json.loads(sk.makefile().readline())
         if "error" in resp:
-            sys.exit(f"herdr-theoldinout: plugin.pane.open: {resp['error']}")
+            sys.exit(f"herdr-inandout: plugin.pane.open: {resp['error']}")
     elif cmd == "daemon":
         daemon()
     elif cmd == "history":

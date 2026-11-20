@@ -1,5 +1,5 @@
-"""python3 test_oldinout.py: the jump list, without herdr."""
-import oldinout as O
+"""python3 test_inandout.py: the jump list, without herdr."""
+import inandout as O
 
 h = O.History()
 assert h.step(-1) is None and h.step(1) is None          # empty: nowhere to go
@@ -34,3 +34,17 @@ else:
         open(f"{t}/herdr/config.toml", "w").write('[keys\n')
         assert O.goto_keys() is None                                          # unreadable: no blind keys
 print("ok")
+
+# 0.4.0 rename: the old plugin's history moves to the new state dir once; an existing new history is kept
+import tempfile
+with tempfile.TemporaryDirectory() as _d:
+    _old, _new = os.path.join(_d, "benjmhart.oldinout"), os.path.join(_d, "benjmhart.inandout")
+    os.makedirs(_old)
+    for _n in ("history.json", "history.desk.json", "daemon.lock"):
+        open(os.path.join(_old, _n), "w").write("[1]")
+    O.migrate(_new)
+    assert sorted(os.listdir(_new)) == ["history.desk.json", "history.json"], os.listdir(_new)
+    open(os.path.join(_old, "history.json"), "w").write("[2]")
+    O.migrate(_new)
+    assert open(os.path.join(_new, "history.json")).read() == "[1]"
+print("ok migrate")
