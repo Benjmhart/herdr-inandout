@@ -168,9 +168,9 @@ class History:
 
 def machines():
     """{label: (hostname, ssh target)} of the enabled machines; "" is this server. The hostname is what that machine
-    calls itself (its window title says it), asked over ssh at start; guessed from the target ("user@carbon.lan" ->
-    "carbon") only for a machine that doesn't answer, which is wrong for an alias (WSL as "wsl" is "wsl-arch",
-    station-maintenance fleet 37, 2026-11-17). ponytail: asked once per daemon start; restart it after a rename."""
+    calls itself (its window title says it), asked over ssh at start; guessed from the target ("user@laptop.lan" ->
+    "laptop") only for a machine that doesn't answer, which is wrong for an alias (WSL as "wsl" is "wsl-arch",
+    2026-11-17). ponytail: asked once per daemon start; restart it after a rename."""
     out, targets = {"": (socket.gethostname(), None)}, {}
     try:
         r = subprocess.run([HERDR, "machine", "list"], capture_output=True, text=True, timeout=10)
@@ -226,7 +226,7 @@ def x11(*args):
 
 
 # Windows, natively or from WSL (powershell.exe through WSL's interop): user32 and SendKeys, as herdr-queues does
-# (station-maintenance fleet 37, 2026-11-16).
+# (2026-11-16).
 def windows_desktop():
     if WIN:
         return True
