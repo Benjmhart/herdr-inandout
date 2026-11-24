@@ -63,7 +63,8 @@ stub: install Python with python.org's **Python install manager**, which answers
 
 Tested on Arch Linux and macOS 14 (Sonoma; an Intel VM, herdr 0.9.5, the Command Line Tools' `python3` 3.9.6) on
 2026-11-19: the tests, the keys (back, forward and the list popup, in an attached client) and the helper the daemon runs
-there (focus events, focus commands, requests, the history copy), run locally, not yet over ssh from a Linux desk.
+there (focus events, focus commands, requests, the history copy), run locally and, on 2026-11-23, over real ssh from a
+Linux desk.
 **Not on macOS:** the daemon: it needs X11 or Windows to see and drive the window, so on a Mac it records nothing. A
 Mac is a machine you reach from a Linux or Windows desk.
 
