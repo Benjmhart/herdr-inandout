@@ -46,10 +46,12 @@ QUIET = 2.0  # seconds after our own jump in which focus changes are its side ef
 AGENT = r'''
 import json, os, socket, subprocess, sys, threading
 P = os.environ.get("HERDR_SOCKET_PATH") or (os.path.join(os.environ["APPDATA"], "herdr", "herdr.sock") if os.name == "nt"
-                                             else os.path.expanduser("~/.config/herdr/herdr.sock"))
+                                             else os.path.join(os.environ.get("XDG_CONFIG_HOME") or
+                                                               os.path.expanduser("~/.config"), "herdr", "herdr.sock"))
 if os.name == "nt" and not P.startswith("\\\\.\\pipe\\"):  # a path-shaped name in the pipe namespace
     P = "\\\\.\\pipe\\" + P
-R = os.path.join(os.environ["LOCALAPPDATA"] if os.name == "nt" else os.path.expanduser("~/.local/state"),
+R = os.path.join(os.environ["LOCALAPPDATA"] if os.name == "nt" else
+                 os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
                  "herdr", "plugins", "benjmhart.inandout", "requests")
 D = os.path.dirname(R)
 NAME = lambda d: d.replace(".", "").replace("-", "").replace("_", "").isalnum() and len(d) < 64

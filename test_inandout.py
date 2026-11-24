@@ -48,3 +48,15 @@ with tempfile.TemporaryDirectory() as _d:
     O.migrate(_new)
     assert open(os.path.join(_new, "history.json")).read() == "[1]"
 print("ok migrate")
+
+# the helper on another machine honours its XDG_STATE_HOME / XDG_CONFIG_HOME (no herdr there: it stops at the socket)
+if os.name != "nt":
+    import subprocess
+    with tempfile.TemporaryDirectory() as _x:
+        _env = {k: v for k, v in os.environ.items() if k != "HERDR_SOCKET_PATH"}
+        _env.update(XDG_STATE_HOME=_x + "/s", XDG_CONFIG_HOME=_x + "/c")
+        os.makedirs(_x + "/c/herdr"); open(_x + "/c/herdr/herdr.sock", "w").close()  # not a socket: refused, not missing
+        _r = subprocess.run([sys.executable, "-c", O.AGENT], env=_env, capture_output=True, text=True, timeout=10)
+        assert os.path.exists(_x + "/s/herdr/plugins/benjmhart.inandout/requests")
+        assert "ConnectionRefusedError" in _r.stderr, _r.stderr
+print("ok xdg")
