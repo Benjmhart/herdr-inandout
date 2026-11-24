@@ -55,8 +55,8 @@ if os.name != "nt":
     with tempfile.TemporaryDirectory() as _x:
         _env = {k: v for k, v in os.environ.items() if k != "HERDR_SOCKET_PATH"}
         _env.update(XDG_STATE_HOME=_x + "/s", XDG_CONFIG_HOME=_x + "/c")
-        os.makedirs(_x + "/c/herdr"); open(_x + "/c/herdr/herdr.sock", "w").close()  # not a socket: refused, not missing
+        os.makedirs(_x + "/c/herdr"); open(_x + "/c/herdr/herdr.sock", "w").close()  # found, not a socket
         _r = subprocess.run([sys.executable, "-c", O.AGENT], env=_env, capture_output=True, text=True, timeout=10)
         assert os.path.exists(_x + "/s/herdr/plugins/benjmhart.inandout/requests")
-        assert "ConnectionRefusedError" in _r.stderr, _r.stderr
+        assert _r.returncode and "FileNotFoundError" not in _r.stderr, _r.stderr  # refused (Linux), non-socket (macOS)
 print("ok xdg")
