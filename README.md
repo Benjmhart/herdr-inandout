@@ -92,3 +92,10 @@ while the screen is locked. `inandout.py history` prints the list (`>` marks whe
 CI (`.github/workflows/ci.yml`) runs the tests on Linux, macOS and Windows and links the plugin into a real herdr on every push. Tag a release only from a commit whose run is green.
 
 MIT licence.
+
+## More tools
+
+- [herdr-queues](https://github.com/Benjmhart/herdr-queues): the sidebar and popup that sort every agent into what needs you now
+- [herdr-machine-icons](https://github.com/Benjmhart/herdr-machine-icons): one icon per pane for the machine it runs on
+- [agent-upgrade](https://github.com/Benjmhart/agent-upgrade): restarts your Claude Code agents onto a new version without losing work
+- [point-here](https://github.com/Benjmhart/point-here): Claude in Chrome points at what you must click, instead of describing it
